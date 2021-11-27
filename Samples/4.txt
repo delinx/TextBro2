@@ -1,0 +1,2235 @@
+/********************************************************************************************
+* TextBro version 0.1.
+*
+* Changelog:
+* 0.1 - refactoring of test demo file into readable and workable program.
+*
+* Developed and supported by Mihails "Delinx" Mozajevs Sep 2021
+*********************************************************************************************/
+
+
+
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+/*  TODO:
+
+C
+*
+
+H
+*
+
+M
+*
+
+L
+* Add blinking to cursor
+
+*/////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+/*  Global variables, defines and includes                                                  */
+
+#include "raylib.h"
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <ctype.h>
+
+#include <time.h>                   // Required for: time_t, tm, time(), localtime(), strftime()
+
+
+#define FONT_GLYPH_SIZE_X 8.0f
+#define FONT_GLYPH_SIZE_Y 16.0f
+
+#define TargetFps 240
+
+#define LOG_INFO 0
+#define LOG_ERROR 1
+#define LOG_WARNING 2
+#define LOG_DEBUG 3
+
+#define COLOR_BAKGROUND_TEXT (Color){ 28, 28, 28, 255 }
+#define COLOR_EDITOR_TEXT (Color){ 230, 216, 189, 255 }
+#define COLOR_STATUSBAR_BG (Color){ 40, 80, 120, 255 }
+
+#define COLOR_ORANGE_BRIGHT (Color){ 254, 128, 25, 255 }
+#define COLOR_ORANGE_DARKER (Color){ 230, 150, 20, 255 }
+#define COLOR_GREY (Color){ 117, 117, 117, 255 }
+#define COLOR_RED (Color){ 204, 36, 29, 255 }
+#define COLOR_RED_SOFT (Color){ 123, 96, 96, 255 }
+#define COLOR_RED_BRIGHT (Color){ 250, 75, 60, 255 }
+#define COLOR_PINK (Color){ 220, 75, 75, 255 }
+#define COLOR_PINK_BRIGHT (Color){ 220, 135, 175, 255 }
+#define COLOR_PINK_BRIGHTER (Color){ 230, 70, 100, 255 }
+#define COLOR_GOLD (Color){ 250, 190, 5, 255 }
+
+#define COLOR_BRACKETS_0 (Color){ 69, 133, 136, 255 }
+#define COLOR_BRACKETS_1 (Color){ 177, 98, 134, 255 }
+#define COLOR_BRACKETS_2 (Color){ 204, 36, 29, 255 }
+#define COLOR_BRACKETS_3 (Color){ 110, 69, 136, 255 }
+#define COLOR_BRACKETS_4 (Color){ 214, 93, 14, 255 }
+#define COLOR_BRACKETS_5 (Color){ 89, 160, 61, 255 }
+
+#define COLOR_BRACKETS_C1 (Color){ 200, 130, 80, 255 }
+
+#define COLOR_STRING (Color){ 177, 177, 5, 255 }
+#define COLOR_CHAR (Color){ 200, 140, 50, 255 }
+
+#define CHAR_LIMIT 8192
+
+#define DEBUG_MODE false
+
+Font fontTtf;
+
+int _screenHeight;
+int _screenWidth;
+
+int virtualCursorOffset;
+
+int linesOffset;
+int lineOffsetFromLeft;
+
+int mouseXgrid;
+int mouseYgrid;
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+/*  Text Processing                                                                         */
+// Maybe break enttire text into tokens, seperating on " ", "\n" , "(){}[]""", when parser
+// finds one of these it runs off to process further until finding next same teg, then based
+// that calculation we can colour in something we are about to print since we already know
+// where it ends
+// interesting functions to note
+// char *LoadFileText(const char *fileName);                               // Load text data from file (read), returns a '\0' terminated string
+// void UnloadFileText(unsigned char *text);                               // Unload file text data allocated by LoadFileText()
+
+char *readTextFromFile(unsigned char *file)
+{
+    char* text = LoadFileText(file);
+    char* _tmp = malloc(sizeof(char)*strlen(text)+1);
+    strcpy(_tmp,text);
+    UnloadFileText(text);
+    return _tmp;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+/*  log helper function                                                                     */
+
+// Custom logging funtion
+void LogCustom(int msgType, const char *text, va_list args)
+{
+    char timeStr[64] = { 0 };
+    time_t now = time(NULL);
+    struct tm *tm_info = localtime(&now);
+
+    strftime(timeStr, sizeof(timeStr), "%Y-%m-%d %H:%M:%S", tm_info);
+    printf("[%s] ", timeStr);
+
+    switch (msgType)
+    {
+        case LOG_INFO: printf("[INFO] : "); break;
+        case LOG_ERROR: printf("[ERROR]: "); break;
+        case LOG_WARNING: printf("[WARN] : "); break;
+        case LOG_DEBUG: printf("[DEBUG]: "); break;
+        default: break;
+    }
+
+    //vprintf(text, args);
+    printf("\n");
+}
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+/*  Drawing helper funcions                                                                 */
+
+// Draw given character in the cell, grid size is kept in int _screenHeight, _screenWidth,
+// oeprates based on pixel offset so out of bounds in not dangerous if occurs.
+int drawCharInCell(int x, int y, char chr , Color color)
+{
+   DrawTextCodepoint(fontTtf, chr, (Vector2){ (int)FONT_GLYPH_SIZE_X*x, (int)FONT_GLYPH_SIZE_Y*y }, 16, color);
+   return 0;
+}
+
+// Draw given string in cells horizontally, oeprates based on pixel offset so out of bounds in
+// not dangerous if occurs.
+int drawStringInCells(int x, int y, const char *_str , Color color)
+{
+   for (int i = 0; i < strlen(_str); i++)
+   {
+        drawCharInCell(x+i, y, _str[i], color);
+   }
+   return 0;
+}
+
+// Draws rectangle the size of a cell 8x16, same as drawCharInCell uses pixel offset so
+// out of bound is not dangerous if occurs.
+int drawBgInCell(int x, int y, Color color)
+{
+   DrawRectangle((int)FONT_GLYPH_SIZE_X*x,(int)FONT_GLYPH_SIZE_Y*y, 8, 16, color);
+   return 0;
+}
+
+int drawBoxCustom(int x, int y, int xx, int yy, Color color)
+{
+   DrawRectangle(x,y, xx, yy, color);
+   return 0;
+}
+
+// Same as drawBgInCell but with no fill, only border, uses pixel offset so
+// out of bound is not dangerous if occurs.
+int drawBgInCellLines(int x, int y, Color color)
+{
+   DrawRectangleLines((int)FONT_GLYPH_SIZE_X*x,(int)FONT_GLYPH_SIZE_Y*y, 8, 16, color);
+   return 0;
+}
+
+// Drawing 2x16px cursor on screen of needed colour by using thin drawBgInCellLines uses
+// pixel offset so out of bound is not dangerous if occurs.
+int drawCursor(int x, int y, Color color)
+{
+   DrawRectangleLines((int)FONT_GLYPH_SIZE_X*x,(int)FONT_GLYPH_SIZE_Y*y, 2, 16, color);
+   return 0;
+}
+
+// Uses low alpha drawBgInCell to showcase conversion of mouse coordinats into global grid
+int showMouseCursor()
+{
+    mouseXgrid = (GetMouseX() - GetMouseX() % (int)FONT_GLYPH_SIZE_X) / 8;
+    mouseYgrid = (GetMouseY() - GetMouseY() % (int)FONT_GLYPH_SIZE_Y) / 16;
+    drawBgInCell(mouseXgrid,mouseYgrid , (Color){ 230, 216, 189, 75});
+}
+
+// Draw status bar at the top of the screen
+int emojiTick = 0;
+int drawStatusBar()
+{
+    // Draw status bar background colour
+    for ( int i = 0; i < _screenWidth; i++)
+    {
+        drawBgInCell(0+i,0,COLOR_STATUSBAR_BG);
+    }
+
+    //Draw waving emoji "/(^.^)\ \(^o^)\"
+    emojiTick++;
+    if (emojiTick < TargetFps)
+    {
+        drawStringInCells(_screenWidth - 8,0, "/(^.^)\\", COLOR_EDITOR_TEXT);
+    }
+    else if (emojiTick < TargetFps * 2)
+    {
+        drawStringInCells(_screenWidth - 8,0, "\\(^o^)\\", COLOR_EDITOR_TEXT);
+    }
+    else
+    {
+        emojiTick = 0;
+    }
+
+    // Draw grid size as "x000 y000"
+    drawStringInCells(_screenWidth - 20,0, TextFormat("x%03d", _screenWidth), COLOR_EDITOR_TEXT);
+    drawStringInCells(_screenWidth - 15,0, TextFormat("y%03d", _screenHeight), COLOR_EDITOR_TEXT);
+
+    // Draw mouse position as "000:000"
+    drawStringInCells(_screenWidth - 30,0, TextFormat("%03d:%03d", mouseXgrid, mouseYgrid), COLOR_EDITOR_TEXT);
+
+    // draw fps
+    drawStringInCells(1,0, TextFormat("fps %03d", GetFPS()), COLOR_EDITOR_TEXT);
+
+    return 0;
+}
+
+// Draw bottom status bar
+int drawBottomStatusBar(int lineOffset, int totalLines, int cursorLineOffset, int cursorCharOffset)
+{
+    // Draw status bar background colour
+    for ( int i = 0; i < _screenWidth; i++)
+    {
+        drawBgInCell(0+i,_screenHeight-1,COLOR_STATUSBAR_BG);
+    }
+
+    drawStringInCells(_screenWidth - 12,_screenHeight-1, TextFormat("lo:%d/%d", lineOffset , totalLines), COLOR_EDITOR_TEXT);
+
+    drawStringInCells(_screenWidth - 30,_screenHeight-1, TextFormat("cl:%d ch:%d", cursorLineOffset , cursorCharOffset), COLOR_EDITOR_TEXT);
+
+    return 0;
+}
+
+// Draw number bar on the left
+int drawNumberBar()
+{
+    for (int i = 1; i < _screenHeight - 1;i++)
+    {
+        drawBgInCell(0,i,(Color){51,51,51,255});
+        drawBgInCell(1,i,(Color){51,51,51,255});
+        drawBgInCell(2,i,(Color){51,51,51,255});
+        drawBgInCell(3,i,(Color){51,51,51,255});
+        drawBgInCell(4,i,(Color){51,51,51,255});
+    }
+    return 0;
+}
+
+// Print text on string, taking into consideration number of times to offset based on "\n", quite messy right now
+int chatOffsetFromStart = 0;
+
+
+// each line in a file will be added into it's own unqiue S_LINE object
+// each line includes own \n at [0] index, no line can exist without it.
+// smallest possible line is "\n" , regular line is "\nHello world"
+
+struct S_Line
+{
+    char *buffer; // contents of string, size determined during intialization
+    char *ColorBuffer; // contents of string, size determined during intialization
+    int lenght;
+    int bufferSize;
+    int lineGlobalNumber;
+};
+
+// example of use
+// struct S_Line* test = S_Line_new("test",4,1024,1);
+struct S_Line* S_Line_new_constructor (char *_buffer,int _lenght, int _bufferSize, int _lineGlobalNumber)
+{
+    struct S_Line* sl = malloc(sizeof(struct S_Line));
+
+    sl->buffer = malloc(sizeof(char)*_bufferSize+1);
+    strcpy (sl->buffer,_buffer);
+
+    sl->lenght = malloc(sizeof(int));
+    sl->lenght = _lenght;
+
+    sl->bufferSize = malloc(sizeof(int));
+    sl->bufferSize = _bufferSize;
+
+    sl->lineGlobalNumber = malloc(sizeof(int));
+    sl->lineGlobalNumber = _lineGlobalNumber;
+
+    return sl;
+}
+
+void S_Line_new (struct S_Line* S_Line_p,const char *_buffer,int _lenght, int _bufferSize, int _lineGlobalNumber)
+{
+
+    //free(S_Line_p->buffer);
+    S_Line_p->buffer = malloc(sizeof(char)*_bufferSize+1);
+    strcpy (S_Line_p->buffer,_buffer);
+
+    //free(S_Line_p->lenght);
+    S_Line_p->lenght = malloc(sizeof(int));
+    S_Line_p->lenght = _lenght;
+
+    //free(S_Line_p->bufferSize);
+    S_Line_p->bufferSize = malloc(sizeof(int));
+    S_Line_p->bufferSize = _bufferSize;
+
+    //free(S_Line_p->lineGlobalNumber);
+    S_Line_p->lineGlobalNumber = malloc(sizeof(int));
+    S_Line_p->lineGlobalNumber = _lineGlobalNumber;
+}
+
+// S_Line_removeChar(test,1);
+int S_Line_removeChar (struct S_Line* sl, int index)
+{
+    // there is 1 char left but we still try to remove, set line to \0 then.
+    if (sl->lenght == 1 && index == 0)
+    {
+        if(DEBUG_MODE){printf("\n Method 1\n");}
+        sl->buffer[0] = '\n';
+        sl->lenght = 1;
+        return -1;
+    }
+
+    // index is negative or lenght of string is less than index
+    if (sl->lenght <= index && index > 0)
+    {
+        if(DEBUG_MODE){printf("\n Method 2\n");}
+        return -1;
+    }
+
+    if(DEBUG_MODE){printf("\n Method 3\n");}
+    // temp buffer which is exact copy of initial buffer
+    char *_buffer =  malloc(sizeof(char)*sl->bufferSize);
+    strcpy (_buffer,sl->buffer);
+
+    // clear initail buffer
+    free(sl->buffer);
+    sl->buffer = malloc(sizeof(char)*sl->bufferSize);
+
+    // copy all chars except one we don't need
+    int step = 0;
+    for (int i = 0; i < sl->lenght;i++)
+    {
+        if (i != index)
+        {
+            sl->buffer[step] = _buffer[i];
+            step++;
+        }
+    }
+
+    // adjust new lenght
+    sl->lenght = sl->lenght - 1;
+    //TODO - reshrink the size of buffer to regular smallest unit of line buffer size (1024?)
+    return 0;
+}
+
+// S_Line_addChar(test,0,'A');
+int S_Line_addChar (struct S_Line* sl, int index, char ch)
+{
+    if (sl->lenght == 1 && sl->buffer[0] == '\n')
+    {
+        sl->buffer[0] = ch;
+        return 1;
+    }
+
+    // index is negatiave or lenght of string is less than index
+    if (index > sl->lenght || index < 0)
+    {
+        return -1;
+    }
+
+    // temp buffer which is exact copy of initial buffer
+    char *_buffer =  malloc(sizeof(char)*sl->bufferSize);
+    strcpy (_buffer,sl->buffer);
+
+    // clear initial buffer
+    free(sl->buffer);
+    sl->buffer = malloc(sizeof(char)*sl->bufferSize);
+
+    // copy all chars except one we don't need
+    int step = 0;
+    for (int i = 0; i < sl->lenght+1;i++)
+    {
+        if (i != index)
+        {
+            sl->buffer[i] = _buffer[step];
+            step++;
+        }
+        else
+        {
+            sl->buffer[i] = ch;
+        }
+    }
+
+    // adjust new lenght
+    sl->lenght = sl->lenght + 1;
+
+    //TODO - resize the size of buffer to bigger size (2x?)
+}
+
+struct S_LineManager
+{
+    int totalLines;
+    struct S_Line* ssline;
+
+    //cursor
+    int cursorLineOffset;
+    int cursorCharOffset;
+    int lineOffset;
+};
+
+struct S_LineManager* readFileIntoLines(const char *file)
+{
+    struct S_LineManager* slm = malloc(sizeof(struct S_LineManager));
+
+    char* sourceText = readTextFromFile(file);
+
+    slm->ssline = malloc(sizeof(struct S_Line) * 524288);
+
+    // parse text into S_Line array
+    int text_offset = 0;
+    int glineOffset = 0;
+    char* text_buffer = malloc(sizeof(char)*CHAR_LIMIT);
+    for (int a = 0; a < CHAR_LIMIT; a++)
+    {
+         text_buffer[a] = '\0';
+    }
+
+    for(int i = 0; i < strlen(sourceText)+1; i++)
+    {
+        if (sourceText[i] == '\n' || sourceText[i] == '\0') // attempt to fix missing last line if \n is not present
+        {
+            text_buffer[text_offset] = sourceText[i];
+            if (sourceText[i] == '\0')
+            {
+                S_Line_new(&slm->ssline[glineOffset],text_buffer,strlen(text_buffer),CHAR_LIMIT,glineOffset); // WARNING: -1 is here as test, for some reason \0 is added to each string and that fixes it
+            }
+            else
+            {
+                S_Line_new(&slm->ssline[glineOffset],text_buffer,strlen(text_buffer)-1,CHAR_LIMIT,glineOffset); // WARNING: -1 is here as test, for some reason \0 is added to each string and that fixes it
+            }
+            //printf("%s", (text_buffer));
+            glineOffset++;
+            text_offset = 0;
+            for (int a = 0; a < CHAR_LIMIT; a++)
+            {
+                text_buffer[a] = '\0';
+            }
+        }
+        else
+        {
+            text_buffer[text_offset] = sourceText[i];
+            text_offset++;
+        }
+    }
+
+    slm->totalLines = glineOffset;
+
+    return slm;
+}
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+/*  Print to screen                                                                         */
+
+char* lineManagerToCharArray(struct S_LineManager* slm) // TODO: make copy of this function which ignores one line (for merging lines), generally I need funciton to mrge and split lines
+{
+    int totalChars = 0;
+    for (int i = 0; i < slm->totalLines;i++)
+    {
+        totalChars += slm->ssline[i].lenght + 1;
+    }
+
+    char *buffer = malloc(totalChars);
+
+    int step = 0;
+    for (int i = 0; i < slm->totalLines;i++)
+    {
+        for (int a = 0; a < slm->ssline[i].lenght;a++)
+        {
+            buffer[step] = slm->ssline[i].buffer[a];
+            if (slm->ssline[i].buffer[a] != '\n') // to test this addition of removing \0 on parse
+            {
+                step++;
+            }
+        }
+        if (i == slm->totalLines-1)
+        {
+            buffer[step] = '\0';
+        }
+        else
+        {
+            buffer[step] = '\n';
+        }
+        step++;
+    }
+
+
+    //printf("%d", slm->totalLines);
+
+    return buffer;
+}
+
+Color getBracketColour(int colourIndex)
+{
+    int _colourIndex = colourIndex;
+
+    if (_colourIndex < 0)
+    {
+        _colourIndex = abs(_colourIndex) ;
+    }
+    else if (_colourIndex > 6)
+    {
+        _colourIndex = _colourIndex % 6;
+    }
+
+    switch (_colourIndex)
+    {
+        case 0:
+        case 1:
+        return (COLOR_BRACKETS_0);
+        break;
+
+        case 2:
+        return (COLOR_BRACKETS_1);
+        break;
+
+        case 3:
+        return (COLOR_BRACKETS_2);
+        break;
+
+        case 4:
+        return (COLOR_BRACKETS_3);
+        break;
+
+        case 5:
+        return (COLOR_BRACKETS_4);
+
+        case 6:
+        return (COLOR_BRACKETS_5);
+        break;
+    }
+
+    // backup return
+    return (COLOR_BRACKETS_0);
+}
+
+
+void keyWordsToSyntaxColours(char *buffer,int len)
+{
+    for (int i = 0; i < len; i++)
+    {
+        if (i+7 < len) // for 8c long
+        {
+            if (i < 7)
+            {
+                if (buffer[i] == 'c') // continue
+                {
+                    if (buffer[i+1] == 'o' && buffer[i+2] == 'n' && buffer[i+3] == 't' && buffer[i+4] == 'i' && buffer[i+5] == 'n' && buffer[i+6] == 'u' && buffer[i+7] == 'e')
+                    {
+                        buffer[i] = '2';buffer[i+1] = '2';buffer[i+2] = '2';buffer[i+3] = '2';buffer[i+4] = '2';buffer[i+5] = '2';buffer[i+6] = '2';buffer[i+7] = '2';
+                    }
+                }
+                if (buffer[i] == 'u') // unsigned
+                {
+                    if (buffer[i+1] == 'n' && buffer[i+2] == 's' && buffer[i+3] == 'i' && buffer[i+4] == 'g' && buffer[i+5] == 'n' && buffer[i+6] == 'e' && buffer[i+7] == 'd')
+                    {
+                        buffer[i] = '4';buffer[i+1] = '4';buffer[i+2] = '4';buffer[i+3] = '4';buffer[i+4] = '4';buffer[i+5] = '4';buffer[i+6] = '4';buffer[i+7] = '4';
+                    }
+                }
+                if (buffer[i] == 'v') // volatile
+                {
+                    if (buffer[i+1] == 'o' && buffer[i+2] == 'l' && buffer[i+3] == 'a' && buffer[i+4] == 't' && buffer[i+5] == 'i' && buffer[i+6] == 'l' && buffer[i+7] == 'e')
+                    {
+                        buffer[i] = '4';buffer[i+1] = '4';buffer[i+2] = '4';buffer[i+3] = '4';buffer[i+4] = '4';buffer[i+5] = '4';buffer[i+6] = '4';buffer[i+7] = '4';
+                    }
+                }
+                if (buffer[i] == 'r') // register
+                {
+                    if (buffer[i+1] == 'e' && buffer[i+2] == 'g' && buffer[i+3] == 'i' && buffer[i+4] == 's' && buffer[i+5] == 't' && buffer[i+6] == 'e' && buffer[i+7] == 'r')
+                    {
+                        buffer[i] = '5';buffer[i+1] = '5';buffer[i+2] = '5';buffer[i+3] = '5';buffer[i+4] = '5';buffer[i+5] = '5';buffer[i+6] = '5';buffer[i+7] = '5';
+                    }
+                }
+            }
+            else if (buffer[i-1] == ' ')
+            {
+                if (buffer[i] == 'c') // switch
+                {
+                    if (buffer[i+1] == 'o' && buffer[i+2] == 'n' && buffer[i+3] == 't' && buffer[i+4] == 'i' && buffer[i+5] == 'n' && buffer[i+6] == 'u' && buffer[i+7] == 'e')
+                    {
+                        buffer[i] = '2';buffer[i+1] = '2';buffer[i+2] = '2';buffer[i+3] = '2';buffer[i+4] = '2';buffer[i+5] = '2';buffer[i+6] = '2';buffer[i+7] = '2';
+                    }
+                }
+                if (buffer[i] == 'u') // unsigned
+                {
+                    if (buffer[i+1] == 'n' && buffer[i+2] == 's' && buffer[i+3] == 'i' && buffer[i+4] == 'g' && buffer[i+5] == 'n' && buffer[i+6] == 'e' && buffer[i+7] == 'd')
+                    {
+                        buffer[i] = '4';buffer[i+1] = '4';buffer[i+2] = '4';buffer[i+3] = '4';buffer[i+4] = '4';buffer[i+5] = '4';buffer[i+6] = '4';buffer[i+7] = '4';
+                    }
+                }
+                if (buffer[i] == 'v') // volatile
+                {
+                    if (buffer[i+1] == 'o' && buffer[i+2] == 'l' && buffer[i+3] == 'a' && buffer[i+4] == 't' && buffer[i+5] == 'i' && buffer[i+6] == 'l' && buffer[i+7] == 'e')
+                    {
+                        buffer[i] = '4';buffer[i+1] = '4';buffer[i+2] = '4';buffer[i+3] = '4';buffer[i+4] = '4';buffer[i+5] = '4';buffer[i+6] = '4';buffer[i+7] = '4';
+                    }
+                }
+                if (buffer[i] == 'r') // register
+                {
+                    if (buffer[i+1] == 'e' && buffer[i+2] == 'g' && buffer[i+3] == 'i' && buffer[i+4] == 's' && buffer[i+5] == 't' && buffer[i+6] == 'e' && buffer[i+7] == 'r')
+                    {
+                        buffer[i] = '5';buffer[i+1] = '5';buffer[i+2] = '5';buffer[i+3] = '5';buffer[i+4] = '5';buffer[i+5] = '5';buffer[i+6] = '5';buffer[i+7] = '5';
+                    }
+                }
+            }
+        }
+
+        if (i+6 < len) // for 7c long
+        {
+            if (i < 6)
+            {
+                if (buffer[i] == 'd') // default
+                {
+                    if (buffer[i+1] == 'e' && buffer[i+2] == 'f' && buffer[i+3] == 'a' && buffer[i+4] == 'u' && buffer[i+5] == 'l' && buffer[i+6] == 't')
+                    {
+                        buffer[i] = '2';buffer[i+1] = '2';buffer[i+2] = '2';buffer[i+3] = '2';buffer[i+4] = '2';buffer[i+5] = '2';buffer[i+6] = '2';
+                    }
+                }
+                if (buffer[i] == 't') // typedef
+                {
+                    if (buffer[i+1] == 'y' && buffer[i+2] == 'p' && buffer[i+3] == 'e' && buffer[i+4] == 'd' && buffer[i+5] == 'e' && buffer[i+6] == 'f')
+                    {
+                        buffer[i] = '4';buffer[i+1] = '4';buffer[i+2] = '4';buffer[i+3] = '4';buffer[i+4] = '4';buffer[i+5] = '4';buffer[i+6] = '4';
+                    }
+                }
+            }
+            else if (buffer[i-1] == ' ')
+            {
+                if (buffer[i] == 'd') // default
+                {
+                    if (buffer[i+1] == 'e' && buffer[i+2] == 'f' && buffer[i+3] == 'a' && buffer[i+4] == 'u' && buffer[i+5] == 'l' && buffer[i+6] == 't')
+                    {
+                        buffer[i] = '2';buffer[i+1] = '2';buffer[i+2] = '2';buffer[i+3] = '2';buffer[i+4] = '2';buffer[i+5] = '2';buffer[i+6] = '2';
+                    }
+                }
+                if (buffer[i] == 't') // typedef x
+                {
+                    if (buffer[i+1] == 'y' && buffer[i+2] == 'p' && buffer[i+3] == 'e' && buffer[i+4] == 'd' && buffer[i+5] == 'e' && buffer[i+6] == 'f')
+                    {
+                        buffer[i] = '4';buffer[i+1] = '4';buffer[i+2] = '4';buffer[i+3] = '4';buffer[i+4] = '4';buffer[i+5] = '4';buffer[i+6] = '4';
+                    }
+                }
+            }
+        }
+
+        if (i+5 < len) // for 6c long
+        {
+            if (i < 5)
+            {
+                if (buffer[i] == 's') // switch
+                {
+                    if (buffer[i+1] == 'w' && buffer[i+2] == 'i' && buffer[i+3] == 't' && buffer[i+4] == 'c' && buffer[i+5] == 'h')
+                    {
+                        buffer[i] = '1';buffer[i+1] = '1';buffer[i+2] = '1';buffer[i+3] = '1';buffer[i+4] = '1';buffer[i+5] = '1';
+                    }
+                }
+                if (buffer[i] == 'r') // return
+                {
+                    if (buffer[i+1] == 'e' && buffer[i+2] == 't' && buffer[i+3] == 'u' && buffer[i+4] == 'r' && buffer[i+5] == 'n')
+                    {
+                        buffer[i] = '2';buffer[i+1] = '2';buffer[i+2] = '2';buffer[i+3] = '2';buffer[i+4] = '2';buffer[i+5] = '2';
+                    }
+                }
+                if (buffer[i] == 's') // struct
+                {
+                    if (buffer[i+1] == 't' && buffer[i+2] == 'r' && buffer[i+3] == 'u' && buffer[i+4] == 'c' && buffer[i+5] == 't')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';buffer[i+3] = '3';buffer[i+4] = '3';buffer[i+5] = '3';
+                    }
+                }
+                if (buffer[i] == 'd') // double
+                {
+                    if (buffer[i+1] == 'o' && buffer[i+2] == 'u' && buffer[i+3] == 'b' && buffer[i+4] == 'l' && buffer[i+5] == 'e')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';buffer[i+3] = '3';buffer[i+4] = '3';buffer[i+5] = '3';
+                    }
+                }
+                if (buffer[i] == 'e') // extern
+                {
+                    if (buffer[i+1] == 'x' && buffer[i+2] == 't' && buffer[i+3] == 'e' && buffer[i+4] == 'r' && buffer[i+5] == 'n')
+                    {
+                        buffer[i] = '4';buffer[i+1] = '4';buffer[i+2] = '4';buffer[i+3] = '4';buffer[i+4] = '4';buffer[i+5] = '4';
+                    }
+                }
+                if (buffer[i] == 's') // signed
+                {
+                    if (buffer[i+1] == 'i' && buffer[i+2] == 'g' && buffer[i+3] == 'n' && buffer[i+4] == 'e' && buffer[i+5] == 'd')
+                    {
+                        buffer[i] = '4';buffer[i+1] = '4';buffer[i+2] = '4';buffer[i+3] = '4';buffer[i+4] = '4';buffer[i+5] = '4';
+                    }
+                }
+                if (buffer[i] == 's') // static
+                {
+                    if (buffer[i+1] == 't' && buffer[i+2] == 'a' && buffer[i+3] == 't' && buffer[i+4] == 'i' && buffer[i+5] == 'c')
+                    {
+                        buffer[i] = '4';buffer[i+1] = '4';buffer[i+2] = '4';buffer[i+3] = '4';buffer[i+4] = '4';buffer[i+5] = '4';
+                    }
+                }
+                if (buffer[i] == 's') // sizeof
+                {
+                    if (buffer[i+1] == 'i' && buffer[i+2] == 'z' && buffer[i+3] == 'e' && buffer[i+4] == 'o' && buffer[i+5] == 'f')
+                    {
+                        buffer[i] = '5';buffer[i+1] = '5';buffer[i+2] = '5';buffer[i+3] = '5';buffer[i+4] = '5';buffer[i+5] = '5';
+                    }
+                }
+            }
+            else if (buffer[i-1] == ' ')
+            {
+                if (buffer[i] == 's') // switch
+                {
+                    if (buffer[i+1] == 'w' && buffer[i+2] == 'i' && buffer[i+3] == 't' && buffer[i+4] == 'c' && buffer[i+5] == 'h')
+                    {
+                        buffer[i] = '1';buffer[i+1] = '1';buffer[i+2] = '1';buffer[i+3] = '1';buffer[i+4] = '1';buffer[i+5] = '1';
+                    }
+                }
+                if (buffer[i] == 'r') // return
+                {
+                    if (buffer[i+1] == 'e' && buffer[i+2] == 't' && buffer[i+3] == 'u' && buffer[i+4] == 'r' && buffer[i+5] == 'n')
+                    {
+                        buffer[i] = '2';buffer[i+1] = '2';buffer[i+2] = '2';buffer[i+3] = '2';buffer[i+4] = '2';buffer[i+5] = '2';
+                    }
+                }
+                if (buffer[i] == 's') // struct
+                {
+                    if (buffer[i+1] == 't' && buffer[i+2] == 'r' && buffer[i+3] == 'u' && buffer[i+4] == 'c' && buffer[i+5] == 't' && buffer[i+6] == ' ')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';buffer[i+3] = '3';buffer[i+4] = '3';buffer[i+5] = '3';
+                    }
+                }
+                if (buffer[i] == 'd') // double
+                {
+                    if (buffer[i+1] == 'o' && buffer[i+2] == 'u' && buffer[i+3] == 'b' && buffer[i+4] == 'l' && buffer[i+5] == 'e')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';buffer[i+3] = '3';buffer[i+4] = '3';buffer[i+5] = '3';
+                    }
+                }
+                if (buffer[i] == 'e') // extern
+                {
+                    if (buffer[i+1] == 'x' && buffer[i+2] == 't' && buffer[i+3] == 'e' && buffer[i+4] == 'r' && buffer[i+5] == 'n')
+                    {
+                        buffer[i] = '4';buffer[i+1] = '4';buffer[i+2] = '4';buffer[i+3] = '4';buffer[i+4] = '4';buffer[i+5] = '4';
+                    }
+                }
+                if (buffer[i] == 's') // signed
+                {
+                    if (buffer[i+1] == 'i' && buffer[i+2] == 'g' && buffer[i+3] == 'n' && buffer[i+4] == 'e' && buffer[i+5] == 'd')
+                    {
+                        buffer[i] = '4';buffer[i+1] = '4';buffer[i+2] = '4';buffer[i+3] = '4';buffer[i+4] = '4';buffer[i+5] = '4';
+                    }
+                }
+                if (buffer[i] == 's') // static
+                {
+                    if (buffer[i+1] == 't' && buffer[i+2] == 'a' && buffer[i+3] == 't' && buffer[i+4] == 'i' && buffer[i+5] == 'c')
+                    {
+                        buffer[i] = '4';buffer[i+1] = '4';buffer[i+2] = '4';buffer[i+3] = '4';buffer[i+4] = '4';buffer[i+5] = '4';
+                    }
+                }
+                if (buffer[i] == 's') // sizeof
+                {
+                    if (buffer[i+1] == 'i' && buffer[i+2] == 'z' && buffer[i+3] == 'e' && buffer[i+4] == 'o' && buffer[i+5] == 'f')
+                    {
+                        buffer[i] = '5';buffer[i+1] = '5';buffer[i+2] = '5';buffer[i+3] = '5';buffer[i+4] = '5';buffer[i+5] = '5';
+                    }
+                }
+            }
+        }
+
+        if (i+4 < len) // for 5c long
+        {
+            if (i < 4)
+            {
+                if (buffer[i] == 'w') // while
+                {
+                    if (buffer[i+1] == 'h' && buffer[i+2] == 'i' && buffer[i+3] == 'l' && buffer[i+4] == 'e')
+                    {
+                        buffer[i] = '1';buffer[i+1] = '1';buffer[i+2] = '1';buffer[i+3] = '1';buffer[i+4] = '1';
+                    }
+                }
+                if (buffer[i] == 'b') // break
+                {
+                    if (buffer[i+1] == 'r' && buffer[i+2] == 'e' && buffer[i+3] == 'a' && buffer[i+4] == 'k')
+                    {
+                        buffer[i] = '2';buffer[i+1] = '2';buffer[i+2] = '2';buffer[i+3] = '2';buffer[i+4] = '2';
+                    }
+                }
+                if (buffer[i] == 'f') // false
+                {
+                    if (buffer[i+1] == 'a' && buffer[i+2] == 'l' && buffer[i+3] == 's' && buffer[i+4] == 'e')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';buffer[i+3] = '3';buffer[i+4] = '3';
+                    }
+                }
+                if (buffer[i] == 'f') // float
+                {
+                    if (buffer[i+1] == 'l' && buffer[i+2] == 'o' && buffer[i+3] == 'a' && buffer[i+4] == 't')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';buffer[i+3] = '3';buffer[i+4] = '3';
+                    }
+                }
+                if (buffer[i] == 'c') // const
+                {
+                    if (buffer[i+1] == 'o' && buffer[i+2] == 'n' && buffer[i+3] == 's' && buffer[i+4] == 't')
+                    {
+                        buffer[i] = '4';buffer[i+1] = '4';buffer[i+2] = '4';buffer[i+3] = '4';buffer[i+4] = '4';
+                    }
+                }
+                if (buffer[i] == 's') // short
+                {
+                    if (buffer[i+1] == 'h' && buffer[i+2] == 'o' && buffer[i+3] == 'r' && buffer[i+4] == 't')
+                    {
+                        buffer[i] = '4';buffer[i+1] = '4';buffer[i+2] = '4';buffer[i+3] = '4';buffer[i+4] = '4';
+                    }
+                }
+                if (buffer[i] == 'u') // union
+                {
+                    if (buffer[i+1] == 'n' && buffer[i+2] == 'i' && buffer[i+3] == 'o' && buffer[i+4] == 'n')
+                    {
+                        buffer[i] = '4';buffer[i+1] = '4';buffer[i+2] = '4';buffer[i+3] = '4';buffer[i+4] = '4';
+                    }
+                }
+            }
+            else if (buffer[i-1] == ' ')
+            {
+                if (buffer[i] == 'w') // while
+                {
+                    if (buffer[i+1] == 'h' && buffer[i+2] == 'i' && buffer[i+3] == 'l' && buffer[i+4] == 'e')
+                    {
+                        buffer[i] = '1';buffer[i+1] = '1';buffer[i+2] = '1';buffer[i+3] = '1';buffer[i+4] = '1';
+                    }
+                }
+                if (buffer[i] == 'b') // break
+                {
+                    if (buffer[i+1] == 'r' && buffer[i+2] == 'e' && buffer[i+3] == 'a' && buffer[i+4] == 'k')
+                    {
+                        buffer[i] = '2';buffer[i+1] = '2';buffer[i+2] = '2';buffer[i+3] = '2';buffer[i+4] = '2';
+                    }
+                }
+                if (buffer[i] == 'f') // false
+                {
+                    if (buffer[i+1] == 'a' && buffer[i+2] == 'l' && buffer[i+3] == 's' && buffer[i+4] == 'e')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';buffer[i+3] = '3';buffer[i+4] = '3';
+                    }
+                }
+                if (buffer[i] == 'f') // float
+                {
+                    if (buffer[i+1] == 'l' && buffer[i+2] == 'o' && buffer[i+3] == 'a' && buffer[i+4] == 't')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';buffer[i+3] = '3';buffer[i+4] = '3';
+                    }
+                }
+                if (buffer[i] == 'c') // const
+                {
+                    if (buffer[i+1] == 'o' && buffer[i+2] == 'n' && buffer[i+3] == 's' && buffer[i+4] == 't')
+                    {
+                        buffer[i] = '4';buffer[i+1] = '4';buffer[i+2] = '4';buffer[i+3] = '4';buffer[i+4] = '4';
+                    }
+                }
+                if (buffer[i] == 's') // short
+                {
+                    if (buffer[i+1] == 'h' && buffer[i+2] == 'o' && buffer[i+3] == 'r' && buffer[i+4] == 't')
+                    {
+                        buffer[i] = '4';buffer[i+1] = '4';buffer[i+2] = '4';buffer[i+3] = '4';buffer[i+4] = '4';
+                    }
+                }
+                if (buffer[i] == 'u') // union
+                {
+                    if (buffer[i+1] == 'n' && buffer[i+2] == 'i' && buffer[i+3] == 'o' && buffer[i+4] == 'n')
+                    {
+                        buffer[i] = '4';buffer[i+1] = '4';buffer[i+2] = '4';buffer[i+3] = '4';buffer[i+4] = '4';
+                    }
+                }
+            }
+        }
+
+        if (i+3 < len) // for 4c long
+        {
+            if (i < 4)
+            {
+                if (buffer[i] == 'e') // else
+                {
+                    if (buffer[i+1] == 'l' && buffer[i+2] == 's' && buffer[i+3] == 'e')
+                    {
+                        buffer[i] = '1';buffer[i+1] = '1';buffer[i+2] = '1';buffer[i+3] = '1';
+                    }
+                }
+                if (buffer[i] == 'c') // case
+                {
+                    if (buffer[i+1] == 'a' && buffer[i+2] == 's' && buffer[i+3] == 'e')
+                    {
+                        buffer[i] = '2';buffer[i+1] = '2';buffer[i+2] = '2';buffer[i+3] = '2';
+                    }
+                }
+                if (buffer[i] == 'g') // goto
+                {
+                    if (buffer[i+1] == 'o' && buffer[i+2] == 't' && buffer[i+3] == 'o')
+                    {
+                        buffer[i] = '2';buffer[i+1] = '2';buffer[i+2] = '2';buffer[i+3] = '2';
+                    }
+                }
+                if (buffer[i] == 'c') // char
+                {
+                    if (buffer[i+1] == 'h' && buffer[i+2] == 'a' && buffer[i+3] == 'r')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';buffer[i+3] = '3';
+                    }
+                }
+                if (buffer[i] == 't') // true
+                {
+                    if (buffer[i+1] == 'r' && buffer[i+2] == 'u' && buffer[i+3] == 'e')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';buffer[i+3] = '3';
+                    }
+                }
+                if (buffer[i] == 'b') // bool
+                {
+                    if (buffer[i+1] == 'o' && buffer[i+2] == 'o' && buffer[i+3] == 'l')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';buffer[i+3] = '3';
+                    }
+                }
+                if (buffer[i] == 'v') // void
+                {
+                    if (buffer[i+1] == 'o' && buffer[i+2] == 'i' && buffer[i+3] == 'd')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';buffer[i+3] = '3';
+                    }
+                }
+                if (buffer[i] == 'a') // auto
+                {
+                    if (buffer[i+1] == 'u' && buffer[i+2] == 't' && buffer[i+3] == 'o')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';buffer[i+3] = '3';
+                    }
+                }
+                if (buffer[i] == 'e') // enum
+                {
+                    if (buffer[i+1] == 'n' && buffer[i+2] == 'u' && buffer[i+3] == 'm')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';buffer[i+3] = '3';
+                    }
+                }
+                if (buffer[i] == 'l') // long
+                {
+                    if (buffer[i+1] == 'o' && buffer[i+2] == 'n' && buffer[i+3] == 'g')
+                    {
+                        buffer[i] = '4';buffer[i+1] = '4';buffer[i+2] = '4';buffer[i+3] = '4';
+                    }
+                }
+            }
+            else if (buffer[i-1] == ' ')
+            {
+                if (buffer[i] == 'e') // else
+                {
+                    if (buffer[i+1] == 'l' && buffer[i+2] == 's' && buffer[i+3] == 'e')
+                    {
+                        buffer[i] = '1';buffer[i+1] = '1';buffer[i+2] = '1';buffer[i+3] = '1';
+                    }
+                }
+                if (buffer[i] == 'c') // case
+                {
+                    if (buffer[i+1] == 'a' && buffer[i+2] == 's' && buffer[i+3] == 'e')
+                    {
+                        buffer[i] = '2';buffer[i+1] = '2';buffer[i+2] = '2';buffer[i+3] = '2';
+                    }
+                }
+                if (buffer[i] == 'g') // goto
+                {
+                    if (buffer[i+1] == 'o' && buffer[i+2] == 't' && buffer[i+3] == 'o')
+                    {
+                        buffer[i] = '2';buffer[i+1] = '2';buffer[i+2] = '2';buffer[i+3] = '2';
+                    }
+                }
+                if (buffer[i] == 'c') // char
+                {
+                    if (buffer[i+1] == 'h' && buffer[i+2] == 'a' && buffer[i+3] == 'r' && buffer[i+4] == ' ')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';buffer[i+3] = '3';
+                    }
+                }
+                if (buffer[i] == 't') // true
+                {
+                    if (buffer[i+1] == 'r' && buffer[i+2] == 'u' && buffer[i+3] == 'e')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';buffer[i+3] = '3';
+                    }
+                }
+                if (buffer[i] == 'b') // true
+                {
+                    if (buffer[i+1] == 'o' && buffer[i+2] == 'o' && buffer[i+3] == 'l')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';buffer[i+3] = '3';
+                    }
+                }
+                if (buffer[i] == 'v') // void
+                {
+                    if (buffer[i+1] == 'o' && buffer[i+2] == 'i' && buffer[i+3] == 'd')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';buffer[i+3] = '3';
+                    }
+                }
+                if (buffer[i] == 'a') // auto
+                {
+                    if (buffer[i+1] == 'u' && buffer[i+2] == 't' && buffer[i+3] == 'o')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';buffer[i+3] = '3';
+                    }
+                }
+                if (buffer[i] == 'e') // enum
+                {
+                    if (buffer[i+1] == 'n' && buffer[i+2] == 'u' && buffer[i+3] == 'm')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';buffer[i+3] = '3';
+                    }
+                }
+                if (buffer[i] == 'l') // long
+                {
+                    if (buffer[i+1] == 'o' && buffer[i+2] == 'n' && buffer[i+3] == 'g')
+                    {
+                        buffer[i] = '4';buffer[i+1] = '4';buffer[i+2] = '4';buffer[i+3] = '4';
+                    }
+                }
+            }
+        }
+        if (i+3 < len) // for 3c long
+        {
+            if (i < 3)
+            {
+                if (buffer[i] == 'i') // int
+                {
+                    if (buffer[i+1] == 'n' && buffer[i+2] == 't' && buffer[i+3] == ' ')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';
+                    }
+                }
+                if (buffer[i] == 'f') // for
+                {
+                    if (buffer[i+1] == 'o' && buffer[i+2] == 'r' && buffer[i+3] == ' ')
+                    {
+                        buffer[i] = '1';buffer[i+1] = '1';buffer[i+2] = '1';
+                    }
+                }
+            }
+            else if (buffer[i-1] == ' ')
+            {
+                if (buffer[i] == 'i') // int
+                {
+                    if (buffer[i+1] == 'n' && buffer[i+2] == 't' && buffer[i+3] == ' ')
+                    {
+                        buffer[i] = '3';buffer[i+1] = '3';buffer[i+2] = '3';
+                    }
+                }
+                if (buffer[i] == 'f') // for
+                {
+                    if (buffer[i+1] == 'o' && buffer[i+2] == 'r' && buffer[i+3] == ' ')
+                    {
+                        buffer[i] = '1';buffer[i+1] = '1';buffer[i+2] = '1';
+                    }
+                }
+            }
+        }
+        if (i+2 < len) // for 2c long
+        {
+                if (i < 2)
+                {
+                    if (buffer[i] == 'i') // if
+                    {
+                        if (buffer[i+1] == 'f' && buffer[i+2] == ' ')
+                        {
+                            buffer[i] = '1';buffer[i+1] = '1';
+                        }
+                    }
+                    if (buffer[i] == 'd') // do
+                    {
+                        if (buffer[i+1] == 'o' && buffer[i+2] == ' ')
+                        {
+                            buffer[i] = '1';buffer[i+1] = '1';
+                        }
+                    }
+                }
+                else if (buffer[i-1] == ' ')
+                {
+                    if (buffer[i] == 'i') // if
+                    {
+                        if (buffer[i+1] == 'f' && buffer[i+2] == ' ')
+                        {
+                            buffer[i] = '1';buffer[i+1] = '1';
+                        }
+                    }
+                    if (buffer[i] == 'd') // do
+                    {
+                        if (buffer[i+1] == 'o' && buffer[i+2] == ' ')
+                        {
+                            buffer[i] = '1';buffer[i+1] = '1';
+                        }
+                    }
+                }
+            }
+        }
+}
+
+void addLine(struct S_LineManager* slm,int pos,char *content)
+{
+    int _pos = pos;
+
+    if (pos > slm->totalLines-1) // if pos of new line is higher then total lines number set it to NEXT LINE after total lines number
+    {
+        _pos = slm->totalLines;
+    }
+
+    if (pos < 0)
+    {
+        _pos = 0;
+    }
+
+    //printf("\naddLine: Requested to make new line at %d", _pos);
+
+    if (_pos == slm->totalLines) // just insert new data and do totallines +1 cause we insert stuff to the end
+    {
+        //printf("\naddLine: Made new line at %d", _pos);
+        S_Line_new(&slm->ssline[_pos],content,strlen(content), CHAR_LIMIT, _pos);
+        slm->totalLines++;
+    }
+    else // need to relocate all old elements, itterate their inner pos statuc, insert new line and increase total liens
+    {
+        // make new line at the end of the file
+        // copy lenght, pos + icrement, content, buffer, repeat
+       S_Line_new(&slm->ssline[slm->totalLines],TextFormat(""),strlen(TextFormat("")), CHAR_LIMIT, slm->totalLines);
+       slm->totalLines++;
+       for (int i = slm->totalLines-1; i > _pos - 1;i--)
+       {
+           if (i == _pos) // if line is right under one we added from then splitLine{
+           {
+               slm->ssline[i].lenght = strlen(content);
+               strcpy(slm->ssline[i].buffer,content);
+              // printf("\naddLine: Move split line %d to %d", i,i+1);
+           }
+           else
+           {
+               slm->ssline[i].lenght = slm->ssline[i-1].lenght;
+               slm->ssline[i].bufferSize = slm->ssline[i-1].bufferSize;
+               strcpy(slm->ssline[i].buffer,slm->ssline[i-1].buffer);
+               //printf("\naddLine: Move line %d to %d", i,i+1);
+           }
+       }
+    }
+}
+
+int removeLine(struct S_LineManager* slm,char *content)
+{
+    int _pos = slm->cursorLineOffset;
+
+    if (_pos > slm->totalLines-1) // if pos of new line is higher then total lines number set it to NEXT LINE after total lines number
+    {
+        _pos = slm->totalLines-1;
+    }
+
+    if (_pos < 1)
+    {
+        return 0;
+    }
+
+   //for (int i = 0; i < slm->ssline[i] )
+
+   if(DEBUG_MODE){printf("\nremoveLine: %s", content);}
+
+
+    int _step = 0;
+    int _size = slm->ssline[_pos-1].lenght;
+    for (int i = _size; i < _size + strlen(content);i++)
+    {
+        if (content[_step] != '\n')
+        {
+        if(DEBUG_MODE){printf("\nremoveLine: %d and size is %d", i, slm->ssline[_pos-1].lenght);}
+        slm->ssline[_pos-1].buffer[i] = content[_step];
+        slm->ssline[_pos-1].lenght++;
+        }
+        _step++;
+    }
+
+    for (int i = 0; i < slm->ssline[_pos-1].lenght;i++)
+    {
+        if (slm->ssline[_pos-1].buffer[i] == '\n')
+        {
+            if(DEBUG_MODE){printf("\nFOUND \n ON: %d", i);}
+            S_Line_removeChar(&slm->ssline[_pos-1],i);
+        }
+    }
+
+   if(DEBUG_MODE){ printf("\nremoveLine: %s\0", slm->ssline[_pos-1].buffer);}
+
+   if(DEBUG_MODE){printf("\nremoveLine: Requested to remove line at %d", _pos+1);}
+   for (int i = _pos;i < slm->totalLines-1;i++)
+   {
+       slm->ssline[i].lenght = slm->ssline[i+1].lenght;
+       slm->ssline[i].bufferSize = slm->ssline[i+1].bufferSize;
+       strcpy(slm->ssline[i].buffer,slm->ssline[i+1].buffer);
+       if(DEBUG_MODE){printf("\nremoveLine: Move line %d to %d", i,i+1);}
+   }
+
+}
+
+   // char *buffer; // contents of string, size determined during intialization
+   // char *ColorBuffer; // contents of string, size determined during intialization
+   // int lenght;
+  //  int bufferSize;
+   // int lineGlobalNumber;
+
+int printTextIntoTable(struct S_LineManager* slm)
+{
+    //drawStringInCells(0 ,y + 1 ,TextFormat("% 4d",numofns),COLOR_EDITOR_TEXT);
+
+    int _sh = _screenHeight - 2;
+    int _sw = _screenWidth - 5;
+
+    int realLinesUsed = slm->lineOffset;
+
+    int charOffset = 0;
+
+    char *fullTextAsString = lineManagerToCharArray(slm);
+
+    // confert buffer into local temp buffer
+    // print char by char like you used to before
+    // if out of space just stop mid print
+    // TODO
+    // I do not to add any kind of editing into this structure, no add or remove char, maybe smth with cursor
+    // but this is just a display loop first and foremost, the actual editing happens to objects within array
+    bool screenIsFull = false;
+    bool outOfLines = false;
+
+    int screenLinesUsed = 0;
+
+    // () {} [] "" ''
+    int roundBracketIndex = 0;
+    //int pointyBracketIndex = 0;
+    int squareBracketIndex = 4;
+
+    bool quotesBracketBool = false;
+    bool miniQuotesBracketBool = false;
+
+    bool comment = false;
+    bool multiLineComment = false;
+
+    int localLineOffset = slm->lineOffset;
+
+    bool keywordLocked = false;
+    bool keywordt1 = false;
+    bool keywordt2 = false;
+    bool keywordt3 = false;
+
+    for (int i = 0; i < strlen(fullTextAsString);i++) // catch multi line comments for highlighting
+    {
+        if (localLineOffset > 0)
+        {
+            if (fullTextAsString[i] == '\n')
+            {
+                localLineOffset--;
+            }
+        }
+        else
+        {
+            if (i > 0) // fixed out of bounds read
+            {
+                if (fullTextAsString[i] == '*' && fullTextAsString[i-1] == '/')
+                {
+                    break; // bugfix: out of bounds on last pass if offset is close to max
+                }
+
+                if (fullTextAsString[i] == '/' && fullTextAsString[i-1] == '*')
+                {
+                    multiLineComment = true;
+                    break; // bugfix: out of bounds on last pass if offset is close to max
+                }
+            }
+        }
+    }
+
+    while (!screenIsFull && !outOfLines)
+    {
+        if (screenLinesUsed > _sh-2)
+        {
+            screenIsFull = true;
+            break;
+        }
+        if (realLinesUsed >= slm->totalLines)
+        {
+            outOfLines = true;
+            break;
+        }
+
+        // generate highlight map for strings
+        slm->ssline[realLinesUsed].ColorBuffer = malloc(sizeof(char)*CHAR_LIMIT);
+        strcpy(slm->ssline[realLinesUsed].ColorBuffer,slm->ssline[realLinesUsed].buffer );
+
+        for (int i = 0; i < slm->ssline[realLinesUsed].lenght;i++)
+        {
+            if (!isalpha(slm->ssline[realLinesUsed].ColorBuffer[i]) && slm->ssline[realLinesUsed].ColorBuffer[i] != '_')
+            {
+                slm->ssline[realLinesUsed].ColorBuffer[i] = ' ';
+            }
+        }
+        keyWordsToSyntaxColours(slm->ssline[realLinesUsed].ColorBuffer, slm->ssline[realLinesUsed].lenght);
+
+        //printf("\n %s \n",slm->ssline[realLinesUsed].ColorBuffer);
+
+        // for highlihgting sapcebars beginning of line
+        bool lineStarted = false;
+
+        // cursor block     //
+
+        // normalize values
+        if (slm->cursorLineOffset < 0)
+        {
+            slm->cursorLineOffset = 0;
+        }
+        if (slm->cursorCharOffset < 0)
+        {
+            slm->cursorCharOffset = 0;
+        }
+
+        if (slm->cursorLineOffset > slm->totalLines-1)
+        {
+            slm->cursorLineOffset = slm->totalLines-1;
+        }
+
+        if (realLinesUsed == slm->cursorLineOffset)
+        {
+            if (slm->ssline[realLinesUsed].lenght == 1 && slm->ssline[realLinesUsed].buffer[0] == '\n' && slm->cursorCharOffset > 0)
+            {
+                slm->cursorCharOffset = 0;
+            }
+        }
+
+        if (realLinesUsed == slm->cursorLineOffset)
+        {
+            if (slm->cursorCharOffset > slm->ssline[realLinesUsed].lenght)
+            {
+                slm->cursorCharOffset = slm->ssline[realLinesUsed].lenght;
+            }
+            drawCursor(slm->cursorCharOffset+5, screenLinesUsed+1, COLOR_GOLD);
+        }
+
+        // cursor block end //
+
+        // scroll screen with cursor if within 5 lines from up or down of screen
+
+
+        if (slm->cursorLineOffset > slm->lineOffset + _sh - 7 && slm->cursorLineOffset > 5)
+        {
+            slm->lineOffset++;
+        }
+
+        if (slm->cursorLineOffset < slm->lineOffset + 7 && slm->lineOffset > 0)
+        {
+            slm->lineOffset--;
+        }
+
+        // scroll screen end //
+
+        Color _color = COLOR_EDITOR_TEXT;
+        if (slm->ssline[realLinesUsed].lenght <= _sw)
+        {
+
+            for (int i = 0; i < slm->ssline[realLinesUsed].lenght; i++)
+            {
+                if (!multiLineComment)
+                {
+                _color = COLOR_EDITOR_TEXT;
+                }
+
+                // Colour brackets //////////////////////////////////////////////////////
+                if (slm->ssline[realLinesUsed].buffer[i] == '(' && !comment && !multiLineComment)
+                {
+                    roundBracketIndex++;
+                    _color = getBracketColour(roundBracketIndex);
+                }
+                else if (slm->ssline[realLinesUsed].buffer[i] == ')' && !comment && !multiLineComment)
+                {
+                    _color = getBracketColour(roundBracketIndex);
+                    if (roundBracketIndex > 0)
+                    {
+                    roundBracketIndex--;
+                    }
+                }
+
+                // [ ]
+                if (slm->ssline[realLinesUsed].buffer[i] == '[' && !comment && !multiLineComment)
+                {
+                    squareBracketIndex++;
+                    _color = getBracketColour(squareBracketIndex);
+                }
+                else if (slm->ssline[realLinesUsed].buffer[i] == ']' && !comment && !multiLineComment)
+                {
+                    _color = getBracketColour(squareBracketIndex);
+                    if (squareBracketIndex > 0)
+                    {
+                    squareBracketIndex--;
+                    }
+                }
+
+                // { }
+                if (slm->ssline[realLinesUsed].buffer[i] == '{' || slm->ssline[realLinesUsed].buffer[i] == '}' && !comment && !multiLineComment)
+                {
+                    _color = COLOR_BRACKETS_C1;
+                }
+
+                if (slm->ssline[realLinesUsed].buffer[i] == ';' && !comment && !multiLineComment)
+                {
+                    _color = COLOR_RED;
+                }
+
+                // "" and ''
+                if (slm->ssline[realLinesUsed].buffer[i] == '"' && !comment && !multiLineComment && !miniQuotesBracketBool)
+                {
+                    if (slm->ssline[realLinesUsed].buffer[i-1] == '\\' && slm->ssline[realLinesUsed].buffer[i-2] != '\\')
+                    {
+                        drawCharInCell(5+i,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[i],_color);
+                        continue;
+                    }
+                    quotesBracketBool = !quotesBracketBool;
+                    _color = getBracketColour(2);
+                    drawCharInCell(5+i,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[i],_color);
+                    continue;
+                }
+
+                if (slm->ssline[realLinesUsed].buffer[i] == '\'' && !comment && !multiLineComment && !quotesBracketBool)
+                {
+                    if (i > 2) // out of bounds fix
+                    {
+                        if (slm->ssline[realLinesUsed].buffer[i-1] == '\\' && slm->ssline[realLinesUsed].buffer[i-2] != '\\')
+                        {
+                            drawCharInCell(5+i,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[i],_color);
+                            continue;
+                        }
+                    }
+                    miniQuotesBracketBool = !miniQuotesBracketBool;
+                    _color = getBracketColour(2);
+                    drawCharInCell(5+i,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[i],_color);
+                    continue;
+                }
+
+                if (slm->ssline[realLinesUsed].buffer[i] == '/' && slm->ssline[realLinesUsed].buffer[i-1] == '/' && !comment && !multiLineComment) // start comment
+                {
+                    if (i > 1) // out of bounds fix
+                    {
+                    comment = !comment;
+                    drawCharInCell(5+i,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[i],COLOR_GREY);
+                    drawCharInCell(5+i-1,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[i],COLOR_GREY); // dirty fix for colour of first / in double //
+                    continue;
+                    }
+                }
+
+                if (slm->ssline[realLinesUsed].buffer[i] == '*' && slm->ssline[realLinesUsed].buffer[i-1] == '/' && !multiLineComment && !comment) // start multiLineComment
+                {
+                    if (i > 1) // out of bounds fix
+                    {
+                        multiLineComment = !multiLineComment;
+                        drawCharInCell(5+i,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[i],COLOR_GREY);
+                        drawCharInCell(5+i-1,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[i-1],COLOR_GREY); // dirty fix for colour of first / in double //
+                    continue;
+                    }
+                }
+
+                if (slm->ssline[realLinesUsed].buffer[i] == '/' && slm->ssline[realLinesUsed].buffer[i-1] == '*' && multiLineComment && !comment) // start multiLineComment
+                {
+                    if (i > 1) // out of bounds fix
+                    {
+                        multiLineComment = !multiLineComment;
+                        drawCharInCell(5+i,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[i],COLOR_GREY);
+                        drawCharInCell(5+i-1,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[i-1],COLOR_GREY);
+                        continue;
+                    }
+                }
+
+                if (quotesBracketBool) // if within "" draw in green
+                {
+                    drawCharInCell(5+i,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[i],COLOR_STRING);
+                    continue;
+                }
+
+                if (miniQuotesBracketBool) // if within '' draw in orange
+                {
+                    drawCharInCell(5+i,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[i],COLOR_CHAR);
+                    continue;
+                }
+
+                if (comment) // if within '' draw in orange TODO: add check to all other checks if we are inside string/char/comment
+                {
+                    _color = COLOR_GREY;
+                }
+
+                if (multiLineComment) // if within '' draw in orange TODO: add check to all other checks if we are inside string/char/comment
+                {
+                    _color = COLOR_GREY;
+                }
+
+                // = + - / & ^ % * . , : < > // == <= =< >= =>
+                char _l = slm->ssline[realLinesUsed].buffer[i];
+                if (_l == '#' || _l == '>' || _l == '<' || _l == ':' || _l == ',' || _l == '=' || _l == '+' || _l == '|' || _l == '-' || _l == '/' || _l == '&' || _l == '^' || _l == '%' || _l == '*' || _l == '!' || _l == '@' || _l == '#' || _l == '$' && !comment && !multiLineComment)
+                {
+                    if (!comment && !multiLineComment)
+                    {
+                    _color = COLOR_PINK;
+                    }
+                }
+                else if ( _l == '.')
+                {
+                    if (!comment && !multiLineComment)
+                    {
+                    _color = COLOR_EDITOR_TEXT;
+                    }
+                }
+
+                if (isdigit(_l) && !comment && !multiLineComment)
+                {
+                    _color = COLOR_PINK_BRIGHT;
+                }
+
+
+                if (!lineStarted)
+                {
+                    if (_l != ' ')
+                    {
+                        lineStarted = true;
+                    }
+                    else if (i % 4 == 0 && i != 0)
+                    {
+                        drawBoxCustom((int)FONT_GLYPH_SIZE_X*(5+i)+2,(int)FONT_GLYPH_SIZE_Y*(screenLinesUsed+1)+1,1,1,(Color){60,60,60,255});
+                        drawBoxCustom((int)FONT_GLYPH_SIZE_X*(5+i)+2,(int)FONT_GLYPH_SIZE_Y*(screenLinesUsed+1)+5,1,1,(Color){60,60,60,255});
+                        drawBoxCustom((int)FONT_GLYPH_SIZE_X*(5+i)+2,(int)FONT_GLYPH_SIZE_Y*(screenLinesUsed+1)+9,1,1,(Color){60,60,60,255});
+                        drawBoxCustom((int)FONT_GLYPH_SIZE_X*(5+i)+2,(int)FONT_GLYPH_SIZE_Y*(screenLinesUsed+1)+13,1,1,(Color){60,60,60,255});
+                    }
+                }
+
+                if (keywordLocked)
+                {
+                    _color = COLOR_GOLD;
+                }
+                if (!keywordLocked)
+                {
+
+                }
+
+                // add exception if line just started
+
+
+               // keywords
+
+                if (slm->ssline[realLinesUsed].ColorBuffer[i] == '1' && !comment && !multiLineComment) // loops
+                {
+                    _color = COLOR_PINK_BRIGHTER;
+                }
+                if (slm->ssline[realLinesUsed].ColorBuffer[i] == '2' && !comment && !multiLineComment) // logic
+                {
+                    _color = COLOR_RED_BRIGHT;
+                }
+                if (slm->ssline[realLinesUsed].ColorBuffer[i] == '3' && !comment && !multiLineComment) //types
+                {
+                    _color = COLOR_GOLD;
+                }
+                if (slm->ssline[realLinesUsed].ColorBuffer[i] == '4' && !comment && !multiLineComment) // modifiers
+                {
+                    _color = COLOR_ORANGE_DARKER;
+                }
+                if (slm->ssline[realLinesUsed].ColorBuffer[i] == '5' && !comment && !multiLineComment) // rest
+                {
+                    _color = COLOR_ORANGE_BRIGHT;
+                }
+
+
+
+                ///////////////////////////// Colour end ////////////////////////////////
+
+
+                if (DEBUG_MODE)
+                {
+                    drawCharInCell(5+i,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[i],COLOR_RED_BRIGHT);
+                }
+                else if (_l != '\0' && _l != '\n')
+                {
+                    drawCharInCell(5+i,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[i],_color);
+                }
+            }
+            // deactiveate colour of comment if activated
+            if (comment)
+            {
+                comment = !comment;
+            }
+
+            // draw line number
+            if (realLinesUsed == slm->cursorLineOffset)
+            {
+                drawStringInCells(0,screenLinesUsed+1,TextFormat("% 4d",realLinesUsed+1),COLOR_RED_SOFT);
+            }
+            else
+            {
+                drawStringInCells(0,screenLinesUsed+1,TextFormat("% 4d",realLinesUsed+1),COLOR_GREY);
+            }
+
+            free(slm->ssline[realLinesUsed].ColorBuffer);
+
+            screenLinesUsed++;
+            realLinesUsed++;
+        }
+        else
+        {
+            int _bufferOffset = 0;
+            while (_bufferOffset < slm->ssline[realLinesUsed].lenght)
+            {
+                if (screenLinesUsed > _sh-2)
+                {
+                    screenIsFull = true;
+                    break;
+                }
+                for (int i = 0; i < _sw;i++)
+                {
+                    if (_bufferOffset < slm->ssline[realLinesUsed].lenght)
+                    {
+                        /// color block
+
+                           if (!multiLineComment)
+                            {
+                            _color = COLOR_EDITOR_TEXT;
+                            }
+
+                            // Colour brackets //////////////////////////////////////////////////////
+                            if (slm->ssline[realLinesUsed].buffer[_bufferOffset] == '(' && !comment && !multiLineComment)
+                            {
+                                roundBracketIndex++;
+                                _color = getBracketColour(roundBracketIndex);
+                            }
+                            else if (slm->ssline[realLinesUsed].buffer[_bufferOffset] == ')' && !comment && !multiLineComment)
+                            {
+                                _color = getBracketColour(roundBracketIndex);
+                                if (roundBracketIndex > 0)
+                                {
+                                roundBracketIndex--;
+                                }
+                            }
+
+                            // [ ]
+                            if (slm->ssline[realLinesUsed].buffer[_bufferOffset] == '[' && !comment && !multiLineComment)
+                            {
+                                squareBracketIndex++;
+                                _color = getBracketColour(squareBracketIndex);
+                            }
+                            else if (slm->ssline[realLinesUsed].buffer[_bufferOffset] == ']' && !comment && !multiLineComment)
+                            {
+                                _color = getBracketColour(squareBracketIndex);
+                                if (squareBracketIndex > 0)
+                                {
+                                squareBracketIndex--;
+                                }
+                            }
+
+                            // { }
+                            if (slm->ssline[realLinesUsed].buffer[_bufferOffset] == '{' || slm->ssline[realLinesUsed].buffer[_bufferOffset] == '}' && !comment && !multiLineComment)
+                            {
+                                _color = COLOR_BRACKETS_C1;
+                            }
+
+                            if (slm->ssline[realLinesUsed].buffer[_bufferOffset] == ';' && !comment && !multiLineComment)
+                            {
+                                _color = COLOR_RED;
+                            }
+
+                            // "" and ''
+                            if (slm->ssline[realLinesUsed].buffer[_bufferOffset] == '"' && !comment && !multiLineComment && !miniQuotesBracketBool)
+                            {
+                                if (slm->ssline[realLinesUsed].buffer[i-1] == '\\' && slm->ssline[realLinesUsed].buffer[i-2] != '\\')
+                                {
+                                }
+                                else
+                                {
+                                    quotesBracketBool = !quotesBracketBool;
+                                    _color = getBracketColour(2);
+                                }
+                            }
+
+                            if (slm->ssline[realLinesUsed].buffer[_bufferOffset] == '\'' && !comment && !multiLineComment && !quotesBracketBool)
+                            {
+                                if (slm->ssline[realLinesUsed].buffer[i-1] == '\\' && slm->ssline[realLinesUsed].buffer[i-2] != '\\')
+                                {
+                                }
+                                else
+                                {
+                                    miniQuotesBracketBool = !miniQuotesBracketBool;
+                                    _color = getBracketColour(2);
+                                }
+                            }
+
+                            if (slm->ssline[realLinesUsed].buffer[_bufferOffset] == '/' && slm->ssline[realLinesUsed].buffer[_bufferOffset-1] == '/' && !comment) // start comment
+                            {
+                                if (i > 1) // out of bounds fix
+                                {
+                                comment = !comment;
+                                drawCharInCell(5+i,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[_bufferOffset],COLOR_GREY);
+                                }
+                            }
+
+                            if (slm->ssline[realLinesUsed].buffer[_bufferOffset] == '*' && slm->ssline[realLinesUsed].buffer[_bufferOffset-1] == '/' && !multiLineComment) // start multiLineComment
+                            {
+                                if (i > 1) // out of bounds fix
+                                {
+                                multiLineComment = !multiLineComment;
+                                drawCharInCell(5+i,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[_bufferOffset],COLOR_GREY);
+                                drawCharInCell(5+i-1,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[_bufferOffset-1],COLOR_GREY); // dirty fix for colour of first / in double //
+                                }
+                            }
+
+                            if (slm->ssline[realLinesUsed].buffer[_bufferOffset] == '/' && slm->ssline[realLinesUsed].buffer[_bufferOffset-1] == '*' && multiLineComment) // start multiLineComment
+                            {
+                                if (i > 1) // out of bounds fix
+                                {
+                                multiLineComment = !multiLineComment;
+                                drawCharInCell(5+i,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[_bufferOffset],COLOR_GREY);
+                                drawCharInCell(5+i-1,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[_bufferOffset-1],COLOR_GREY);
+                                }
+                            }
+
+                            if (quotesBracketBool) // if within "" draw in green
+                            {
+                                drawCharInCell(5+i,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[_bufferOffset],COLOR_STRING);
+                            }
+
+                            if (miniQuotesBracketBool) // if within '' draw in orange
+                            {
+                                drawCharInCell(5+i,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[_bufferOffset],COLOR_CHAR);
+                            }
+
+                            if (comment) // if within '' draw in orange TODO: add check to all other checks if we are inside string/char/comment
+                            {
+                                _color = COLOR_GREY;
+                            }
+
+                            if (multiLineComment) // if within '' draw in orange TODO: add check to all other checks if we are inside string/char/comment
+                            {
+                                _color = COLOR_GREY;
+                            }
+
+                            // = + - / & ^ % * . , : < > // == <= =< >= =>
+                            char _l = slm->ssline[realLinesUsed].buffer[_bufferOffset];
+                            if (_l == '#' || _l == '>' || _l == '<' || _l == ':' || _l == ',' || _l == '|' || _l == '=' || _l == '+' || _l == '-' || _l == '/' || _l == '&' || _l == '^' || _l == '%' || _l == '*' || _l == '!' || _l == '@' || _l == '#' || _l == '$' && !comment && !multiLineComment)
+                            {
+                                if (!comment && !multiLineComment)
+                                {
+                                _color = COLOR_PINK;
+                                }
+                            }
+                            else if ( _l == '.' && !comment && !multiLineComment)
+                            {
+                                if (!comment && !multiLineComment)
+                                {
+                                _color = COLOR_EDITOR_TEXT;
+                                }
+                            }
+
+                            if (isdigit(_l) && !comment && !multiLineComment)
+                            {
+                                _color = COLOR_PINK_BRIGHT;
+                            }
+
+
+                            if (!lineStarted)
+                            {
+                                if (_l != ' ')
+                                {
+                                    lineStarted = true;
+                                }
+                                else if (i % 4 == 0 && i != 0)
+                                {
+                                    drawBoxCustom((int)FONT_GLYPH_SIZE_X*(5+i)+2,(int)FONT_GLYPH_SIZE_Y*(screenLinesUsed+1)+1,1,1,(Color){60,60,60,255});
+                                    drawBoxCustom((int)FONT_GLYPH_SIZE_X*(5+i)+2,(int)FONT_GLYPH_SIZE_Y*(screenLinesUsed+1)+5,1,1,(Color){60,60,60,255});
+                                    drawBoxCustom((int)FONT_GLYPH_SIZE_X*(5+i)+2,(int)FONT_GLYPH_SIZE_Y*(screenLinesUsed+1)+9,1,1,(Color){60,60,60,255});
+                                    drawBoxCustom((int)FONT_GLYPH_SIZE_X*(5+i)+2,(int)FONT_GLYPH_SIZE_Y*(screenLinesUsed+1)+13,1,1,(Color){60,60,60,255});
+                                }
+                            }
+
+                            if (keywordLocked)
+                            {
+                                _color = COLOR_GOLD;
+                            }
+                            if (!keywordLocked)
+                            {
+
+                            }
+
+                            // add exception if line just started
+
+
+                           // keywords
+
+                            if (slm->ssline[realLinesUsed].ColorBuffer[_bufferOffset] == '1' && !comment && !multiLineComment) // loops
+                            {
+                                _color = COLOR_PINK_BRIGHTER;
+                            }
+                            if (slm->ssline[realLinesUsed].ColorBuffer[_bufferOffset] == '2' && !comment && !multiLineComment) // logic
+                            {
+                                _color = COLOR_RED_BRIGHT;
+                            }
+                            if (slm->ssline[realLinesUsed].ColorBuffer[_bufferOffset] == '3' && !comment && !multiLineComment) //types
+                            {
+                                _color = COLOR_GOLD;
+                            }
+                            if (slm->ssline[realLinesUsed].ColorBuffer[_bufferOffset] == '4' && !comment && !multiLineComment) // modifiers
+                            {
+                                _color = COLOR_ORANGE_DARKER;
+                            }
+                            if (slm->ssline[realLinesUsed].ColorBuffer[_bufferOffset] == '5' && !comment && !multiLineComment) // rest
+                            {
+                                _color = COLOR_ORANGE_BRIGHT;
+                            }
+
+
+
+                            ///////////////////////////// Colour end ////////////////////////////////
+
+                        /// color block end ///
+
+
+                        if (DEBUG_MODE)
+                        {
+                            drawCharInCell(5+i,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[_bufferOffset],_color);
+                        }
+                        else if (_l != '\0' && _l != '\n')
+                        {
+                            drawCharInCell(5+i,screenLinesUsed+1,slm->ssline[realLinesUsed].buffer[_bufferOffset],_color);
+                        }
+
+
+                        _bufferOffset++;
+                    }
+                }
+
+                // draw line number
+                if (realLinesUsed == slm->cursorLineOffset)
+                {
+                    if (_bufferOffset <= _sw)
+                    {
+                        drawStringInCells(0,screenLinesUsed+1,TextFormat("% 4d",realLinesUsed+1),COLOR_RED_SOFT);
+                    }
+                }
+                else
+                {
+                    if (_bufferOffset <= _sw)
+                    {
+                        drawStringInCells(0,screenLinesUsed+1,TextFormat("% 4d",realLinesUsed+1),COLOR_GREY);
+                    }
+                }
+
+                screenLinesUsed++;
+            }
+            free(slm->ssline[realLinesUsed].ColorBuffer);
+            realLinesUsed++;
+        }
+
+    }
+
+    free(fullTextAsString);
+}
+
+bool isStringDigits(char *buffer)
+{
+    if (strlen(buffer) < 1)
+    {
+        return 0;
+    }
+
+    for (int i = 0; i < strlen(buffer);i++)
+    {
+        if (!isdigit(buffer[i]))
+        {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+void S_Line_free (struct S_LineManager* slm, int id)
+{
+
+    free(slm->ssline[id].buffer);
+    free(slm->ssline[id].lenght);
+    free(slm->ssline[id].bufferSize);
+    free(slm->ssline[id].lineGlobalNumber);
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+/*  Main                                                                                    */
+
+int main(void)
+{
+    // init variables
+    mouseXgrid = 0;
+    mouseYgrid = 0;
+
+    SetTraceLogCallback(LogCustom);
+
+    // default parameters
+    const int screenWidth = 960;
+    const int screenHeight = 640;
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+    InitWindow(screenWidth, screenHeight, "TextBro");
+    SetTargetFPS(TargetFps);
+
+    // We define a font base size of 16 pixels tall and up-to 512 characters
+    fontTtf = LoadFontEx("FSEX300.ttf", 16, 0, 512);
+
+    struct S_LineManager* slm = readFileIntoLines("test/4.txt");
+
+    slm->cursorLineOffset = 0;
+    slm->cursorCharOffset = 0;
+    slm->lineOffset = 0;
+
+    LogCustom(LOG_DEBUG, TextFormat("Total lines: %d", slm->totalLines),0);
+
+    // TODO: read file stuff, used for development, has to be put in the loop later
+    //char* sourceText = readTextFromFile("test/4.txt");
+
+    //struct S_Line* test = S_Line_new_constructor("test",5,1024,1);
+
+    //S_Line_addChar(test,3,'A');
+    //LogCustom(LOG_DEBUG, TextFormat("%d = %s",test->lenght, test->buffer),0);
+    //S_Line_removeChar(test,0);
+    //S_Line_removeChar(test,0);
+    //S_Line_removeChar(test,0);
+    //LogCustom(LOG_DEBUG, TextFormat("%d = %s",test->lenght, test->buffer),0);
+    //S_Line_addChar(test,0,'A');
+    //LogCustom(LOG_DEBUG, TextFormat("%d = %s",test->lenght, test->buffer),0);
+
+
+
+    //for (int i = 0; i < glineOffset;i++)
+    //{
+    //    LogCustom(LOG_DEBUG, TextFormat("%s", ssline[i].buffer),0);
+    //}
+
+    bool commandLine = false;
+
+    char *consoleBuffer = calloc(0,1024);
+    // Main program loop
+    while (!WindowShouldClose())
+    {
+        if (IsKeyPressed(KEY_F1))
+        {
+            char *test = lineManagerToCharArray(slm);
+            SaveFileText("test.txt", test);
+            free(test);
+        }
+
+        // Reading key input
+        if (IsKeyPressed(KEY_UP))
+        {
+            slm->cursorLineOffset -= 1;
+        }
+        if (IsKeyPressed(KEY_DOWN))
+        {
+            slm->cursorLineOffset += 1;
+        }
+
+        if (IsKeyPressed(KEY_LEFT))
+        {
+            slm->cursorCharOffset -= 1;
+        }
+        if (IsKeyPressed(KEY_RIGHT))
+        {
+            slm->cursorCharOffset += 1;
+        }
+
+        // mouse scroll up down at 3x speed
+        if ( GetMouseWheelMove() > 0.0f)
+        {
+            if ( slm->cursorLineOffset >= 4)
+            {
+                  slm->cursorLineOffset-=3;
+            }
+            else if (slm->cursorLineOffset > 0)
+            {
+                slm->cursorLineOffset--;
+            }
+        }
+        if ( GetMouseWheelMove() < 0.0f)
+        {
+            if (slm->cursorLineOffset+3 < slm->totalLines)
+            {
+                slm->cursorLineOffset+=3;
+            }
+            else if (slm->cursorLineOffset < slm->totalLines)
+            {
+                slm->cursorLineOffset++;
+            }
+        }
+
+        // catch CTRL action - call for command line
+        if (IsKeyPressed(KEY_LEFT_CONTROL) || IsKeyPressed(KEY_RIGHT_CONTROL))
+        {
+            commandLine = !commandLine;
+            for (int a = 0; a < 1024; a++)
+            {
+                consoleBuffer[a] = '\0';
+            }
+        }
+        //////////////////////////////////////////////
+
+        int charToPrint = -1;
+        int _key = GetCharPressed();
+
+        while (_key > 0)
+        {
+            // NOTE: Only allow keys in range [32..125]
+            if ((_key >= 32) && (_key <= 126))
+            {
+                charToPrint = _key;
+            }
+            _key = GetCharPressed();  // Check next character in the queue
+        }
+
+        bool charToRemove = false;
+        if (IsKeyPressed(KEY_BACKSPACE))
+        {
+            charToRemove = true;
+        }
+
+        if (IsKeyPressed(KEY_ENTER))
+        {
+            if (commandLine)
+            {
+                printf("\nConsole: %s",consoleBuffer);
+                if(isStringDigits(consoleBuffer))
+                {
+                    slm->cursorLineOffset = atoi(consoleBuffer);
+                    printf("\nConsole: GO TO %d", atoi(consoleBuffer));
+                }
+                commandLine = !commandLine;
+            }
+            else
+            { // if we at the end of the line then add \n line, otherwise copy from cursor till end
+                if (slm->cursorCharOffset == slm->ssline[slm->cursorLineOffset].lenght)
+                {
+                    //printf("\n New line");
+                    addLine(slm,slm->cursorLineOffset+1,TextFormat("\n"));
+                }
+                else
+                {
+                    char *tempbuffer = malloc(CHAR_LIMIT);
+                    for (int a = 0; a < CHAR_LIMIT; a++)
+                    {
+                        tempbuffer[a] = '\0';
+                    }
+                    int _i = 0;
+                    for (int i = slm->cursorCharOffset; i < slm->ssline[slm->cursorLineOffset].lenght;i++ )
+                    {
+                        // add char
+                        //printf("\n Copy %d = %d which is %c = %c ",_i,i,tempbuffer[_i],slm->ssline[slm->cursorLineOffset].buffer[i]);
+                        tempbuffer[_i] = slm->ssline[slm->cursorLineOffset].buffer[i];
+                        _i++;
+                    }
+                    int _len =  slm->ssline[slm->cursorLineOffset].lenght;
+                    for (int i = _len; i >= slm->cursorCharOffset;i--)
+                    {
+                        // remove char
+                        //printf("\n Remove \"%d\"",i);
+                        S_Line_removeChar(&slm->ssline[slm->cursorLineOffset],i);
+                    }
+
+                    //printf("\n Copy Line %s\0",tempbuffer);
+                    addLine(slm,slm->cursorLineOffset+1,tempbuffer);
+                    free(tempbuffer);
+                }
+
+                // move cursor to new line
+                slm->cursorLineOffset++;
+                slm->cursorCharOffset = 0;
+            }
+        }
+
+        // Refresh size of 8x16px grid avaiable to us
+        _screenHeight = (GetScreenHeight() - GetScreenHeight() % 16) / (int)FONT_GLYPH_SIZE_Y;
+        _screenWidth = (GetScreenWidth() - GetScreenWidth() % 8)  / (int)FONT_GLYPH_SIZE_X;
+
+
+        //char *test = lineManagerToCharArray(slm);
+        //printf("%s\0", test);
+        //SaveFileText("test.txt", test);
+        //free(test);
+
+        // Drawing from here to the end of while
+        BeginDrawing();
+
+        if (_screenHeight > 16 && _screenWidth > 16)
+        {
+            ClearBackground(COLOR_BAKGROUND_TEXT);
+
+            drawStatusBar();
+            drawBottomStatusBar(slm->lineOffset,slm->totalLines, slm->cursorLineOffset+1, slm->cursorCharOffset);
+            drawNumberBar();
+            showMouseCursor();
+
+            printTextIntoTable(slm); // also normalaizes cursor position necessary for incertion or removal of chars
+
+            if (!commandLine)
+            {
+                if (charToPrint != -1)
+                {
+                    S_Line_addChar(&slm->ssline[slm->cursorLineOffset],slm->cursorCharOffset,charToPrint);
+                    slm->cursorCharOffset += 1;
+                }
+
+                if (charToRemove)
+                {
+                    if (slm->cursorCharOffset == 0)
+                    {
+                        char *tempbuffer = malloc(CHAR_LIMIT);
+                        int _offset = slm->ssline[slm->cursorLineOffset].lenght;
+                        for (int a = 0; a < CHAR_LIMIT; a++)
+                        {
+                            tempbuffer[a] = '\0';
+                        }
+                        for (int a = 0; a < slm->ssline[slm->cursorLineOffset].lenght;a++)
+                        {
+                            tempbuffer[a] = slm->ssline[slm->cursorLineOffset].buffer[a];
+                        }
+                        if(DEBUG_MODE){printf("\n ADDING : %s\0\n",tempbuffer);}
+                        removeLine(slm,tempbuffer);
+                        free(tempbuffer);
+                       // for (int a = 0; a < CHAR_LIMIT; a++)
+                        //{
+                        //    slm->ssline[slm->totalLines-1].buffer[a] = '\0';
+                        //}
+                        //slm->ssline[slm->totalLines-1].lenght = 0;
+                        //slm->ssline[slm->totalLines-1].bufferSize = 0;
+
+                        //free(slm->ssline[slm->totalLines-1].buffer);
+                        //free(slm->ssline[slm->totalLines-1].lenght);
+                        //free(slm->ssline[slm->totalLines-1].bufferSize);
+                        //free(slm->ssline[slm->totalLines-1].lineGlobalNumber);
+
+                        slm->totalLines--;
+                       // for (int a = 0; a < CHAR_LIMIT; a++)
+                       // {
+                        //    tempbuffer[a] = '\0';
+                        //}
+                        // decrease global line count by 1
+                        // free last line
+                        slm->cursorLineOffset -= 1;
+                        slm->cursorCharOffset += slm->ssline[slm->cursorLineOffset].lenght - _offset;
+                    }
+                    else
+                    {
+                        S_Line_removeChar(&slm->ssline[slm->cursorLineOffset],slm->cursorCharOffset-1);
+                        slm->cursorCharOffset -= 1;
+                    }
+                }
+            }
+            else
+            {
+                drawCharInCell(0,_screenHeight-1,':',COLOR_EDITOR_TEXT);
+                //draw console
+                if (charToPrint != -1)
+                {
+                    consoleBuffer[strlen(consoleBuffer)] = charToPrint;
+                    //printf("\n%s\n",consoleBuffer);
+                }
+                if (charToRemove && strlen(consoleBuffer) > 0)
+                {
+                    consoleBuffer[strlen(consoleBuffer)-1] = '\0';
+                   // printf("\n%s\n",consoleBuffer);
+                }
+                drawStringInCells(2,_screenHeight-1,consoleBuffer,COLOR_EDITOR_TEXT);
+            }
+
+            //printTextIntoTable(sourceText,lineOffset,0); - rework is in progress
+
+            //drawStringInCells(_screenWidth - 9,_screenHeight-1,TextFormat("lo: %d",lineOffset),WHITE);
+            //drawStringInCells(_screenWidth - 18,_screenHeight-1,TextFormat("co: %d",chatOffsetFromStart),WHITE);
+
+            //drawCharInCell(15,0,lastPressedKey, BLACK);
+
+            //printTextIntoTable(testBuffer, virtualCursorOffset);
+        }
+        else
+        {
+            ClearBackground(BLACK);
+        }
+
+        EndDrawing();
+}
+
+    // De-Initialization
+    //--------------------------------------------------------------------------------------
+    UnloadFont(fontTtf);    // TTF Font unloading
+    CloseWindow();          // Close window and OpenGL context
+    //--------------------------------------------------------------------------------------
+
+    return 0;
+}
+
+
