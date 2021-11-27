@@ -36,18 +36,18 @@ void draw_statusbar_bottom ();
 void draw_sidebar();
 
 /* Window size */
-int screen_width =  960;
-int screen_height = 640;
+extern int screen_width;
+extern int screen_height;
 
 /* Mouse cursor XY */
-int mouse_grid_x = 0;
-int mouse_grid_y = 0;
+extern int mouse_grid_x;
+extern int mouse_grid_y;
 
 /* Global Font */
-int FONT_GLYPH_SIZE_X = 8.0f;
-int FONT_GLYPH_SIZE_Y = 16.0f;
+extern int FONT_GLYPH_SIZE_X;
+extern int FONT_GLYPH_SIZE_Y;
 
 /* Timer for top bar emoji animation */
-int statusbar_emoji_tick = 0;
+extern int statusbar_emoji_tick;
 
 #endif

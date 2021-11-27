@@ -1,5 +1,19 @@
 #include "draw.h"
 
+/* Window size */
+int screen_width =  960;
+int screen_height = 640;
+
+/* Mouse cursor XY */
+int mouse_grid_x = 0;
+int mouse_grid_y = 0;
+
+/* Global Font */
+int FONT_GLYPH_SIZE_X = 8.0f;
+int FONT_GLYPH_SIZE_Y = 16.0f;
+
+int statusbar_emoji_tick = 0;
+
 void update_size_onresize()
 {
     screen_height = (GetScreenHeight() - GetScreenHeight() % 16) / (int)FONT_GLYPH_SIZE_Y; 
