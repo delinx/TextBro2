@@ -49,8 +49,6 @@ int main(int argc, char const *argv[])
     	draw_mouse_cursor(10,10,COLOR_ORANGE_BRIGHT);
 	draw_statusbar_top(font, 16);
 
-    	printf("%d\n", screen_height);
-
 	EndDrawing();
      }
 

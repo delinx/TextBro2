@@ -59,7 +59,7 @@ void draw_cursor(const int x, const int y, Color color)
 }
 
 
-int draw_mouse_cursor(const int x, const int y, const Color color)
+void draw_mouse_cursor(const int x, const int y, const Color color)
 {
     mouse_grid_x = (GetMouseX() - GetMouseX() % (int)FONT_GLYPH_SIZE_X) / 8;
     mouse_grid_y = (GetMouseY() - GetMouseY() % (int)FONT_GLYPH_SIZE_Y) / 16;

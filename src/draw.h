@@ -26,7 +26,7 @@ void draw_bg_line(const int x, const int y, const Color color);
 /* Draws cursor on screen using draw_bg_lines */
 void draw_cursor(const int x, const int y, Color color);
 /* Draw mouse cursor */
-int draw_mouse_cursor(const int x, const int y, const Color color);
+void draw_mouse_cursor(const int x, const int y, const Color color);
 
 /* Macros (collections of above methods) */
 /* Draw status bars */
